@@ -19,7 +19,7 @@ lrate = {'asym':[50, 100], 'sym':[100,100]}
 
 
 class Topology():
-    def __init__(self, numNodes, gType=0, degree=3, tri=0.7, edge=[]):
+    def __init__(self, numNodes, gType=1, degree=3, tri=0.7, edge=[]):
         self.numNodes = numNodes
         self.edge = edge
         if gType == 0:
@@ -34,6 +34,19 @@ class Topology():
             self.edge = nx.edges(self.graph)
 #        nx.draw(self.graph, node_size=50)
 #        plt.show()
+    def updateTopoWithEdge(self, e):
+        if e not in self.edge and (e[1], e[0]) not in self.edge:
+            self.edge.append(e)
+            self.graph.add_edges_from(self.edge)
+
+    def getConnectedPeers(self, n):
+        peerIDs = []
+        for e in self.edge:
+            if n == e[0]:
+                peerIDs.append(e[1])
+            elif n == e[1]:
+                peerIDs.append(e[0])
+        return peerIDs
 
 
 
@@ -217,8 +230,8 @@ def genMPC(numNodes):
     t = initTopo(numNodes, para)
     partition = simul(t, delta, para, selfishOrder)
     numMpc = sum([1 for m in para.partition if m])
-    print(partition, len(para.lspc), numMpc)
-    return t, partition
+    #print(partition, len(para.lspc), numMpc)
+    return t, partition, para.lpc
 
 
 

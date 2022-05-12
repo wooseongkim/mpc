@@ -26,7 +26,7 @@ from transport import *;
 # demand = {(1,2):50, (2,1):100, (1,4):50, (4,1):50, (2,4):50, (4,2):100, (1,3):100, (3,1):50,  (2,3):50, (3,2):50, (3,4):100, (4,3):50}
 
 
-SIMULATION_TIME = 0.2* MINUTE;
+SIMULATION_TIME = 0.1* MINUTE;
 NUM_NODES = 20;
 CONN_PROB = 0.1;
 
@@ -39,58 +39,78 @@ MAX_AMOUNT_PER_PAY = INIT_DEPOSIT
 MIN_AMOUNT_PER_PAY = INIT_DEPOSIT * 0.7
 
 
-nodes =[]
-
+nodes = {}
+sockConns = [] #overlay directional UDP connections
+mpc = []
 #sock == bi-directional connections
 #payGo F1 scenario
 #sockConn = [(0,1),(0,2),(0,3),(1,4),(1,5),(1,6), (2,4),(2,5),(2,6), (3,4),(3,5),(3,6), (4,7), (5,7), (6,7) ];
 linearNet = None
-if linearNet:
-    #linear network 3 PCs
-    sockConn = [(0,1),(1,2),(2,3)] 
-    sockConns = [] #overlay directional UDP connections
-    for e in sockConn:
-        a, b = e;
-        sockConns += [(a,b), (b,a)]
-    
-    #gType =0 (manual graph), 1: powerlaw graph, 2:...
-    topo = routing.Topology(NUM_NODES, sockConn, 0);
-else:
-    topo, partition = test.genMPC(NUM_NODES)
+
 
 #application for PBT
 INIT_SIM =True;
-payers = [0, 3]
-PBTs =[(0, 3), (3, 0)]
+payers = [1, 5]
+PBTs =[(1, 5), (5, 1)]
 
+def genTopo(numNodes):
+    topo = None
+    sockConns = []
+    partition = []
+    if linearNet:
+        # linear network 3 PCs
+        sockConn = [(0, 1), (1, 2), (2, 3)]
+        for e in sockConn:
+            a, b = e;
+            sockConns += [(a, b), (b, a)]
+        topo = routing.Topology(numNodes, sockConn, 0);
+    else:
+        topo, partition, sockConns = test.genMPC(numNodes)
+    return topo, partition, sockConns
 
 def smartContractForDispute(n1, n2, transPbtId): #n1 has not received unlock from n2
     nodes[n1].channels[n2].reImburse(transPbtId)
     nodes[n2].channels[n1].unlock(transPbtId)
-    
-def genNodeLink(numNodes, sockConns):
+
+def searchMpc(i,j, mpc):
+    for m in mpc:
+        if i in m.spcState and j in m.spcState:
+            return m
+    return None
+
+def genNodeLink(numNodes, sockConns, mpc):
     global nodes;
-    nodes = [];
     pcnUser = None;
-    for n in range(numNodes):
+    for n in range(0, numNodes):
         pcnUser = Node(n) # PCN node
         pcnUser.setBlockchainAccess(smartContractForDispute)
-        nodes.append(pcnUser)        
+        nodes[n] = pcnUser
     #open payment channel over socket connection
-    for e in sockConns:
-        a, b = e;
-        nodes[a].createSockPayCh(nodes[b], INIT_DEPOSIT)
+    for a, b in sockConns:
+        _mpc = searchMpc(a,b, mpc) #mpc object
+        if _mpc:
+            if a not in _mpc.psp:
+                _mpc.psp[a] = nodes[a]
+            if b not in _mpc.psp:
+                _mpc.psp[b] = nodes[b]
+        nodes[a].createSockPayCh(nodes[b], INIT_DEPOSIT, _mpc)
 
-
-
-def initializeSim(numNodes, sockConns, topo, pbts):      
+def initializeSim(numNodes, topo, partition, sockConns, pbts):
     global INIT_SIM;
-    INIT_SIM == True;    
+    INIT_SIM == True;
+    global mpc;
     routing.setGlobalTopo(topo);
     simTimer.globalTic = 0;
     simTimer.initTimeList();
     simEvent.initEventQ();
-    genNodeLink(numNodes, sockConns);
+    for p in partition:
+        if p != []:
+            _pspSet = set()
+            for i, j in p:
+                _pspSet.add(i)
+            mpc.append(MPC(len(mpc)+1, list(_pspSet), INIT_DEPOSIT))
+    print("number of MPCs: ", len(mpc), ' partition: ', len(partition))
+    genNodeLink(numNodes, sockConns, mpc)
     pcnStat.initPcnStat(numNodes, sockConns, pbts)
 
 def payApp(payer, payee, amount, routePeriod):    
@@ -102,8 +122,11 @@ def doSimulation(pays, simParam):
     for p in PBTs:        
         if simTimer.globalTic % simParam == 0: # interval
             payApp(p[0], p[1], MIN_AMOUNT_PER_PAY, ROUTING_INTERVAL)
+    for m in mpc:
+        m.updateRounds()
     for n in nodes:
-        n.doProcess(); #arg = hello period
+        nodes[n].doProcess(); #arg = hello period
+
 
 def finishSim():
     return pcnStat.saveStatResult();
@@ -120,11 +143,12 @@ def ticStart(pays, simParam):
 ################################
 # main loop
 #################################
-para = list(range(10, 100, 10)) #period of hellow, rreq, etc
+para = list(range(20, 21, 5)) #period of hellow, rreq, etc
 
 x = []; y = []; y1 = [];
 for p in para:
-    initializeSim(NUM_NODES, sockConns, topo, PBTs)
+    topo, partition, sockConns = genTopo(p)
+    initializeSim(p, topo, partition, sockConns, PBTs)
     succRatio, avgDelay, maxDelay, avgQ = ticStart(PBTs, p);
     x.append(p/1000);
     y.append(succRatio);

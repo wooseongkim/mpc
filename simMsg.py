@@ -17,6 +17,8 @@ MTYPE_ROUTING = 500
 MTYPE_ROUTING_RREQ = 501
 MTYPE_ROUTING_RREP = 502
 
+MTYPE_MPC_ROUND_UPDATE = 600
+MTYPE_MPC_ROUND_COMPLETE = 601
 
 # PCN messages over L4 
 class Message: 
@@ -92,4 +94,3 @@ class Hello:
         self.peer = peer;
         self.transLenTable = trLenTb;
         self.transAmountTable = trAmTb;
-            

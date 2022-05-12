@@ -14,6 +14,7 @@ class PcnStat:
         self.rreq = 0;
         self.rrep = 0;
         self.hello = 0;
+        self.mpcUpdate = 0;
         self.recvhello = 0;
         self.hops = 0;
         self.nonePcnNodes = 0;

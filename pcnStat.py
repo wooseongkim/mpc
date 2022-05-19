@@ -28,23 +28,32 @@ class PcnStat:
         self.cancel = set();
         self.succPbt = set()
         self.maxTxQLen = {}
+        self.mpcRounds = {}
+        self.spcOff = {}
+        self.spcLock = {}
+        self.spcUnlock = {}
     
     
 gStat = 0;    
-def initPcnStat(numNodes, edges, payFlows):
+def initPcnStat(numNodes, edges, payFlows, nMpc):
     global gStat;
     gStat = PcnStat();
     for n in range(numNodes):
         gStat.incentive[n] = 0
+        gStat.spcLock[n] = 0
+        gStat.spcUnlock[n] = 0
     for n in edges:
         gStat.queuedTrans[n] = 0
         gStat.maxTxQLen[n] = 0
+        gStat.spcOff[n] = 0
     for n in payFlows:
         gStat.avgPayDelay[n] = 0
         gStat.minPayDelay[n] = 0
         gStat.maxPayDelay[n] = 0
     for n in range(numNodes):
         gStat.manetFoward[n] = 0
+    for n in range(1, nMpc+1):
+        gStat.mpcRounds[n] = 0
     
 
 def saveStatResult():
@@ -53,7 +62,7 @@ def saveStatResult():
     f.write("-------------------------------------------------------------------\n");
     f.write("Number of successful transaction: "+ str(gStat.numTransaction) + "\n")
     f.write("Number of payment: "+ str(gStat.numPayment) + "\n")
-    f.write("Number of success PBT: " + str(len(gStat.succPbt)) +',' + str(gStat.succPbt) + "\n")
+    #f.write("Number of success PBT: " + str(len(gStat.succPbt)) +',' + str(gStat.succPbt) + "\n")
     f.write("Number of cancel: " + str(len(gStat.cancel)) +',' + str(gStat.cancel) + "\n")
     f.write("Rejected PBTs: "+ str(gStat.rejectPbt) + "\n")
     f.write("On-chain access: "+ str(gStat.outage) + "\n")
@@ -71,8 +80,15 @@ def saveStatResult():
     f.write("Max PBT delay: "+ str(gStat.maxPayDelay) + "\n")
     f.write("Manet forwarding: "+ str(gStat.manetFoward) + "\n")
     f.write("Manet packet drop: "+ str(gStat.pktDrop) + "\n")
+    f.write("MPC rounds: "+str(gStat.mpcRounds) + "\n")
+    f.write("SPC off: "+str(gStat.spcOff)+"\n")
+    f.write("SPC lock: " + str(gStat.spcLock) + "\n")
+    f.write("SPC unlock: " + str(gStat.spcUnlock) + "\n")
     f.close();
     qList = [q for q in gStat.maxTxQLen.values() if q != 0]
     print(qList)
     #maxD = [min(d, 3) for d in gStat.maxPayDelay.values()]
-    return 1- len(gStat.cancel)/gStat.numPayment, list(gStat.avgPayDelay.values())[0], min(list(gStat.maxPayDelay.values())[0], 3), sum(qList)/len(qList)
+    if gStat.numPayment != 0 and len(qList) != 0:
+        return 1- len(gStat.cancel)/gStat.numPayment, list(gStat.avgPayDelay.values())[0], min(list(gStat.maxPayDelay.values())[0], 3), sum(qList)/len(qList)
+    else:
+        return 0, list(gStat.avgPayDelay.values())[0], min(list(gStat.maxPayDelay.values())[0], 3), sum(qList)

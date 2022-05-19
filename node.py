@@ -33,9 +33,9 @@ class MPCServer:
         #             msg.dst), self.id)
 
     def recvMsg(self, msg):
-        MSG_LOG(LOG_MPC_PROTOCOL,
-                "[mpc " + str(self.id) + "] recv MPC complete " + str(msg.type) + ',' + str(msg.ctrlType) + " from " + str(
-                    msg.src), self.id)
+        # MSG_LOG(LOG_MPC_PROTOCOL,
+        #         "[mpc " + str(self.id) + "] recv MPC complete " + str(msg.payload) + " from " + str(
+        #             msg.src), self.id)
         if msg.type == simMsg.MTYPE_CONTROL:
             if msg.ctrlType == simMsg.MTYPE_MPC_ROUND_COMPLETE:
                 i, j = msg.payload
@@ -46,11 +46,11 @@ class MPCServer:
         for s in _spcs:
             i, j = s
             upReq1 = simMsg.Message(self.id, i, simMsg.MTYPE_CONTROL, 0, s);
-            upReq2 = simMsg.Message(self.id, j, simMsg.MTYPE_CONTROL, 0, s);
+            #upReq2 = simMsg.Message(self.id, j, simMsg.MTYPE_CONTROL, 0, s);
             upReq1.setCtrlMtype(simMsg.MTYPE_MPC_ROUND_UPDATE);
-            upReq2.setCtrlMtype(simMsg.MTYPE_MPC_ROUND_UPDATE);
+            #upReq2.setCtrlMtype(simMsg.MTYPE_MPC_ROUND_UPDATE);
             self.sendMsg(upReq1)
-            self.sendMsg(upReq2)
+            #self.sendMsg(upReq2)
         pcnStat.gStat.mpcUpdate += 1;
 
 
@@ -61,8 +61,9 @@ class MPC(MPCServer):
         self.roundCount = 1
         self.round = {}
         self.psp = {} #node objects dic, psp[node id] = node obj
-        self.spcState = {} #current balance
+        self.spcState = {} #current balance for each psp
         self.locked = {} # locked balance
+        self.bUpReqSent = False
         for i in pspList: #[1, 2, 3, ...] node ids
             self.spcState[i] = maxDepo 
             self.locked[i] = 0
@@ -76,11 +77,17 @@ class MPC(MPCServer):
 
     def updateRounds(self):
         if len(self.round[self.roundCount]) == len(self.spcUpdate):
-            self.roundCount = (self.roundCount + 1) % len(self.round)
+            self.roundCount = (self.roundCount + 1) % (len(self.round)+1)
+            if self.roundCount == 0:
+                self.roundCount = 1
             self.spcUpdate = []
-            self.sendRoundUpdateReq(self.round[self.roundCount])
-        else:
-            self.sendRoundUpdateReq(self.round[self.roundCount])
+            self.bUpReqSent = False
+            pcnStat.gStat.mpcRounds[self.mpcId] += 1
+            # MSG_LOG(LOG_MPC_PROTOCOL,
+            #         "[mpc " + str(self.id) + "] round update " + str(self.roundCount) + ' among '+str(self.round), self.id)
+        elif not self.bUpReqSent:
+                self.sendRoundUpdateReq(self.round[self.roundCount])
+                self.bUpReqSent = True
 
     def isOnSPCSlot(self, i,j):
         if (i,j) in self.round[self.roundCount] or (j,i) in self.round[self.roundCount]:
@@ -90,9 +97,11 @@ class MPC(MPCServer):
     def lock(self, i, trans):
         self.spcState[i] -= trans.amount;
         self.locked[i] += trans.amount;
+        pcnStat.gStat.spcLock[i] += trans.amount
 
     def unlock(self, i, trans):
         self.locked[i] -= trans.amount;
+        pcnStat.gStat.spcUnlock[i] += trans.amount
 
     #when receiving secret
     def reImburse(self, i):
@@ -127,10 +136,13 @@ class PayChannel:
         else:
             return amount <= self.curBal;
     def isSPCOn(self):
-        return self.mpc.isOnSPCSlot(self.id[0], self.id[1])
+        _onSlot = self.mpc.isOnSPCSlot(self.id[0], self.id[1])
+        if not _onSlot:
+            pcnStat.gStat.spcOff[(self.id[0], self.id[1])] += 1
+        return _onSlot
 
     def pendTrans(self, trans):
-        self.pendTrans.append(trans); 
+        self.pendTrans.append(trans);
     
     def checkExpiredTrans(self):
         #rollback
@@ -243,13 +255,13 @@ class Node:
         self.pcnLinks[peer.id] = transport.SocketConnect(self, peer);
         self.openChannel(peer.id, iDepo, mpc) #1000 usd
         
-        peer.pcnLinks[self.id] = transport.SocketConnect(peer, self);
-        peer.openChannel(self.id, iDepo, mpc) #1000 usd
+        # peer.pcnLinks[self.id] = transport.SocketConnect(peer, self);
+        # peer.openChannel(self.id, iDepo, mpc) #1000 usd
 
         if mpc:
             self.myMpc[(self.id, peer.id)] = mpc
             self.bSpcEnable[peer.id] = False #not available for the spc
-            self.mpcLinks[mpc.mpcId] = transport.SocketConnect(mpc, self)
+            self.mpcLinks[mpc.mpcId] = transport.SocketConnect(self, mpc)
             mpc.openConnToPsp(self)
 
     def setLowerProto(self, l4):
@@ -513,9 +525,9 @@ class Node:
     def sendMsgToMPC(self, _mpcId, _spc):
         upResp = simMsg.Message(self.id, _mpcId, simMsg.MTYPE_CONTROL, 0, _spc);
         upResp.setCtrlMtype(simMsg.MTYPE_MPC_ROUND_COMPLETE)
-        # MSG_LOG(LOG_MPC_PROTOCOL, "[mpc " + str(self.id) + "] send MPC complete " + str(
-        #     upResp.payload), self.id)
-        self.mpcLinks[_mpcId].sendMsg(upResp);
+        # MSG_LOG(LOG_MPC_PROTOCOL, "[node " + str(self.id) + "] send MPC complete " + str(
+        #      _spc) + ' to '+str(upResp.dst), self.id)
+        self.mpcLinks[upResp.dst].sendMsg(upResp);
     
     #periodic process   
     def doProcess(self, period=10*SECOND):
@@ -534,7 +546,7 @@ class Node:
                     if tr:
                         if tr.mode == simMsg.TRANS_MODE_STATIC_PBT:                    
                             if tr.recv in self.rt.pbtTable:
-                                tr.path = copy.deepcopy(self.rt.pbtTable[tr.recv].path);     
+                                tr.path = copy.deepcopy(self.rt.pbtTable[tr.recv].path)
                                 MSG_LOG(LOG_TYPE_PROCESS, "[node "+str(self.id)+"] dequeue payment to path "+ str(self.rt.pbtTable[tr.recv].path) +" PBT: "+str(tr.pbtId), self.id)
                                 nextHop = tr.path.pop(0)
                                 self.channels[nextHop].lock(tr);
@@ -574,6 +586,7 @@ class Node:
                     pbtId, payer, payee, amount = t.getTransInfo();
                     if c.isPayable(amount):
                         if c.mpc and c.isSPCOn():
+                            print("mpc pay:", c.id)
                             c.lock(t);
                             if t.mode == simMsg.TRANS_MODE_STATIC_PBT:
                                 t.path.pop(0)
@@ -594,7 +607,8 @@ class Node:
         for _peer, _state in self.bSpcEnable.items():
             if _state:
                 _pc = self.channels[_peer]
-                self.sendMsgToMPC(_pc.mpc.id, _pc)
+                self.sendMsgToMPC(_pc.mpc.id, _pc.id)
+                self.bSpcEnable[_peer] = False
                     
         if self.rcvMsgBuffer:
             msg = self.rcvMsgBuffer.pop(0);
@@ -619,7 +633,7 @@ class Node:
                     for f in msg.payload.transLenTable:
                         self.ngbs.updateEntry(msg.payload.id, f, msg.payload.transLenTable[f], msg.payload.transAmountTable[f])
                 elif msg.ctrlType == simMsg.MTYPE_MPC_ROUND_UPDATE:
-                    #MSG_LOG(LOG_MPC_PROTOCOL, "[node " + str(self.id) + "] recv MPC update for " + str(msg.payload), self.id)
+                    #MSG_LOG(LOG_MPC_PROTOCOL, "[node " + str(self.id) + "] recv MPC update for " + str(msg.payload) + ' from '+str(msg.src), self.id)
                     if msg.payload[0] == self.id:
                         if msg.payload[1] in self.channels:
                             self.bSpcEnable[msg.payload[1]] = True

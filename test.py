@@ -230,7 +230,6 @@ def genMPC(numNodes):
     t = initTopo(numNodes, para)
     partition = simul(t, delta, para, selfishOrder)
     numMpc = sum([1 for m in para.partition if m])
-    #print(partition, len(para.lspc), numMpc)
     return t, partition, para.lpc
 
 
